@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Text,
   View,
@@ -9,21 +9,208 @@ import {
   Alert,
   SafeAreaView,
 } from 'react-native';
-import AntennaVisualizer from './components/AntennaVisualizer.js'; 
-import UnitToggle  from './components/UnitToggle.js'; 
+
+import Svg, { Line, Rect, Text as SvgText, Circle, G, Defs, Marker, Path } from 'react-native-svg';
+
+/*
+// Tu auras besoin de @react-native-async-storage/async-storage
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Fonction pour sauvegarder
+const saveAntenna = async (name, data) => {
+  try {
+    const existingString = await AsyncStorage.getItem('saved_antennas');
+    const existing = existingString ? JSON.parse(existingString) : [];
+    const newEntry = { id: Date.now(), name, ...data, date: new Date() };
+    await AsyncStorage.setItem('saved_antennas', JSON.stringify([...existing, newEntry]));
+    Alert.alert('Succès', 'Configuration sauvegardée dans "Mon Shack"');
+  } catch (e) {
+    // Error saving
+  }
+};
+
+*/
+
+
+
+
+
+
+const AntennaVisualizer = ({ result, mode }) => {
+  if (!result) return null;
+
+  // Dimensions du canvas SVG
+  const width = 350;
+  const height = 180;
+  const centerX = width / 2;
+  const centerY = 60;
+  
+  // Échelle visuelle : On fixe la longueur "Cible" à 100px par branche pour l'affichage
+  const baseScale = 100; 
+  
+  // Calcul des longueurs en pixels pour le dessin
+  let measuredPx = baseScale;
+  let targetPx = baseScale;
+
+  // Si on est en mode adjuster, on recalcule l'échelle relative
+  if (mode === 'adjuster') {
+    // Si la mesure est plus grande, elle prend la taille max, la cible rétrécit
+    // Si la mesure est plus petite, la cible prend la taille max, la mesure rétrécit
+    const ratio = result.measuredLength / result.targetLength;
+    
+    if (ratio > 1) {
+      measuredPx = baseScale; // La mesure dépasse (trop long)
+      targetPx = baseScale / ratio;
+    } else {
+      targetPx = baseScale; // La cible est la référence
+      measuredPx = baseScale * ratio; // La mesure est trop courte
+    }
+  }
+
+  const needsCutting = mode === 'adjuster' && result.difference > 0;
+  const needsLengthening = mode === 'adjuster' && result.difference < 0;
+
+  return (
+    <View style={styles.visualizerContainer}>
+      <Text style={styles.visualizerTitle}>
+        {mode === 'adjuster' ? '🔧 Adjustment Diagram' : '📐 Antenna Diagram'}
+      </Text>
+      
+      <Svg height={height} width={width} viewBox={`0 0 ${width} ${height}`}>
+        
+        {/* 1. Câble Coaxial (Feedline) - Toujours au centre */}
+        <Line x1={centerX} y1={centerY} x2={centerX} y2={height - 20} stroke="#333" strokeWidth="4" />
+        <Line x1={centerX} y1={centerY} x2={centerX} y2={height - 20} stroke="#000" strokeWidth="4" strokeDasharray="4,2"/>
+
+        {/* 2. Balun / Isolateur central */}
+        <Rect x={centerX - 6} y={centerY - 8} width="12" height="16" fill="#2c3e50" rx="3" />
+
+        {/* --- BRANCHE GAUCHE --- */}
+        
+        {/* Fil Principal (Target en Calculator, ou Mesuré en Adjuster 'Cut') */}
+        <Line 
+          x1={centerX} y1={centerY} 
+          x2={centerX - (needsLengthening ? targetPx : measuredPx)} 
+          y2={centerY} 
+          stroke="#3498db" 
+          strokeWidth="3" 
+          strokeDasharray={needsLengthening ? "5, 3" : ""} // Pointillés si on doit rallonger (cible fantome)
+        />
+
+        {/* Si on doit couper : On dessine le fil actuel (trop long) en gris/rouge au bout */}
+        {needsCutting && (
+          <Line 
+            x1={centerX - targetPx} y1={centerY} 
+            x2={centerX - measuredPx} 
+            y2={centerY} 
+            stroke="#e74c3c" 
+            strokeWidth="3" 
+          />
+        )}
+
+        {/* Si on doit rallonger : On dessine le fil actuel (trop court) en solide par dessus les pointillés */}
+        {needsLengthening && (
+          <Line 
+            x1={centerX} y1={centerY} 
+            x2={centerX - measuredPx} 
+            y2={centerY} 
+            stroke="#3498db" 
+            strokeWidth="3" 
+          />
+        )}
+
+        {/* --- BRANCHE DROITE (Miroir) --- */}
+        
+        <Line 
+          x1={centerX} y1={centerY} 
+          x2={centerX + (needsLengthening ? targetPx : measuredPx)} 
+          y2={centerY} 
+          stroke="#3498db" 
+          strokeWidth="3"
+          strokeDasharray={needsLengthening ? "5, 3" : ""}
+        />
+        
+        {needsCutting && (
+          <Line 
+            x1={centerX + targetPx} y1={centerY} 
+            x2={centerX + measuredPx} 
+            y2={centerY} 
+            stroke="#e74c3c" 
+            strokeWidth="3" 
+          />
+        )}
+
+        {needsLengthening && (
+          <Line 
+            x1={centerX} y1={centerY} 
+            x2={centerX + measuredPx} 
+            y2={centerY} 
+            stroke="#3498db" 
+            strokeWidth="3" 
+          />
+        )}
+
+        {/* --- ANNOTATIONS --- */}
+
+        {/* Cote de longueur (Texte) */}
+        <SvgText
+          x={centerX + targetPx / 2}
+          y={centerY - 15}
+          fill="#2c3e50"
+          fontSize="12"
+          fontWeight="bold"
+          textAnchor="middle"
+        >
+          L/4 = {result.targetLength.toFixed(3)}m
+        </SvgText>
+
+        {/* Indicateur de Coupe (Ciseaux) ou d'Ajout */}
+        {needsCutting && (
+          <G x={centerX + targetPx} y={centerY}>
+             {/* Ligne verticale de coupe */}
+             <Line x1="0" y1="-10" x2="0" y2="10" stroke="#e74c3c" strokeWidth="2" strokeDasharray="2,2" />
+             <SvgText x="5" y="-15" fill="#e74c3c" fontSize="10" fontWeight="bold">Cut here</SvgText>
+             <SvgText x="5" y="25" fill="#e74c3c" fontSize="10">-{result.difference.toFixed(3)}m</SvgText>
+          </G>
+        )}
+
+        {needsLengthening && (
+          <G x={centerX + measuredPx} y={centerY}>
+             <Circle cx="0" cy="0" r="3" fill="#e74c3c" />
+             <SvgText x="0" y="25" fill="#27ae60" fontSize="10" textAnchor="middle">Add {Math.abs(result.difference).toFixed(3)}m</SvgText>
+          </G>
+        )}
+
+        {/* Labels Généraux */}
+        <SvgText x={centerX - 80} y={height - 20} fill="#7f8c8d" fontSize="10">Coax 50Ω</SvgText>
+        <Circle cx={centerX} cy={centerY} r="2" fill="white" stroke="#333" strokeWidth="1"/>
+        
+      </Svg>
+    </View>
+  );
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const AntennaApp = () => {
   const [mode, setMode] = useState('adjuster'); // 'adjuster' or 'calculator'
   const [measuredFreq, setMeasuredFreq] = useState('');
   const [targetFreq, setTargetFreq] = useState('');
   const [velocityFactor, setVelocityFactor] = useState('0.95');
   const [result, setResult] = useState(null);
-  const [isMetric, setIsMetric] = useState(true);
-useEffect(() => {
-      console.log('isMetric a changé !');
-      calculateAntenna();
-}, [isMetric]);
-
-
+  const [units,setUnits] = useState('metric') ; 
 
   const calculateAntenna = () => {
     // Validation des entrées selon le mode
@@ -60,18 +247,18 @@ useEffect(() => {
 
     // Constantes
     const speedOfLight = 299792458; // m/s
-    const feet = 3.28084 ; 
     
     if (mode === 'adjuster') {
       // Mode Adjuster: calcul de la différence
       const wavelengthMeasured = (speedOfLight * velocityFactorNum) / (measuredFreqNum * 1000000);
       const wavelengthTarget = (speedOfLight * velocityFactorNum) / (targetFreqNum * 1000000);
       
-      const lengthMeasured = isMetric ?  wavelengthMeasured / 4 : (wavelengthMeasured / 4)* feet;
-      const lengthTarget = isMetric? wavelengthTarget / 4: (wavelengthTarget / 4)* feet;
-      const difference =  (lengthMeasured - lengthTarget) ;
-      const unit = isMetric ? 'm' : 'ft'; 
-
+      const foots = 3.28084 ; 
+      const lengthMeasured = wavelengthMeasured / 4;
+      const lengthTarget = wavelengthTarget / 4;
+      
+      const difference = lengthMeasured - lengthTarget;
+      
       setResult({
         mode: 'adjuster',
         measuredLength: lengthMeasured,
@@ -79,15 +266,12 @@ useEffect(() => {
         difference: difference,
         wavelengthMeasured: wavelengthMeasured,
         wavelengthTarget: wavelengthTarget,
-        unit: unit,
       });
-
     } else {
       // Mode Calculator: calcul simple de longueur
       const wavelengthTarget = (speedOfLight * velocityFactorNum) / (targetFreqNum * 1000000);
-      const lengthTarget = isMetric ? wavelengthTarget / 4 : (wavelengthTarget / 4) * feet;
-      const fullDipoleLength = isMetric? wavelengthTarget / 2:  (wavelengthTarget / 2) * feet;
-      const unit = isMetric ? 'm' : 'ft'; 
+      const lengthTarget = wavelengthTarget / 4;
+      const fullDipoleLength = wavelengthTarget / 2;
       
       setResult({
         mode: 'calculator',
@@ -95,7 +279,6 @@ useEffect(() => {
         wavelengthTarget: wavelengthTarget,
         fullDipoleLength: fullDipoleLength,
         frequency: targetFreqNum,
-        unit: unit,
       });
     }
   };
@@ -106,8 +289,6 @@ useEffect(() => {
     setVelocityFactor('0.95');
     setResult(null);
   };
-
-
 
   const switchMode = (newMode) => {
     setMode(newMode);
@@ -121,7 +302,7 @@ useEffect(() => {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>RF Field Companion Tool</Text>
+          <Text style={styles.title}>📡 Antenna Tool</Text>
           <Text style={styles.subtitle}>
             {mode === 'adjuster' 
               ? 'Calculate length difference between two frequencies (λ/2)'
@@ -129,6 +310,7 @@ useEffect(() => {
             }
           </Text>
         </View>
+
         {/* Mode Selector */}
         <View style={styles.modeSection}>
           <Text style={styles.modeTitle}>Select Mode:</Text>
@@ -138,7 +320,7 @@ useEffect(() => {
               onPress={() => switchMode('adjuster')}
             >
               <Text style={[styles.modeButtonText, mode === 'adjuster' && styles.modeButtonTextActive]}>
-                 Antenna Adjuster
+                🔧 Antenna Adjuster
               </Text>
             </TouchableOpacity>
             
@@ -147,10 +329,10 @@ useEffect(() => {
               onPress={() => switchMode('calculator')}
             >
               <Text style={[styles.modeButtonText, mode === 'calculator' && styles.modeButtonTextActive]}>
-                Antenna Calculator
+                📏 Antenna Calculator
               </Text>
             </TouchableOpacity>
-            </View>
+          </View>
         </View>
 
         {/* Input Fields */}
@@ -211,58 +393,47 @@ useEffect(() => {
         {result && (
           <View style={styles.resultSection}>
             <Text style={styles.resultTitle}>📈 Results</Text>
-            <AntennaVisualizer result={result} mode={mode} unit={result.unit}/>
-            <UnitToggle 
-                isMetric={isMetric} 
-                onChange={  setIsMetric } 
-            />
+            {/*  <AntennaVisualizer result={result} mode={mode} />    */}
             {result.mode === 'adjuster' ? (
               // Adjuster Results
               <>
                 <View style={styles.resultCard}>
                   <Text style={styles.resultLabel}>Measured wavelength:</Text>
                   <Text style={styles.resultValue}>
-                    {result.wavelengthMeasured.toFixed(2)} m
-                     {result.unit === 'ft' && `  ( ${(result.wavelengthMeasured * 3.28084).toFixed(2)} ft )`}
+                    {result.wavelengthMeasured.toFixed(3)} m
                   </Text>
                 </View>
 
                 <View style={styles.resultCard}>
                   <Text style={styles.resultLabel}>Target wavelength:</Text>
                   <Text style={styles.resultValue}>
-                    {result.wavelengthTarget.toFixed(2)} m
-                    {result.unit ==='ft' && `  ( ${(result.wavelengthTarget * 3.28084).toFixed(2)  } ft ) `} 
+                    {result.wavelengthTarget.toFixed(3)} m
                   </Text>
                 </View>
 
                 <View style={styles.resultCard}>
                   <Text style={styles.resultLabel}>Measured branch length (λ/4):</Text>
                   <Text style={styles.resultValue}>
-                    {result.measuredLength.toFixed(2)} {result.unit} 
-                    {result.unit === 'ft' &&  ` ( ${(result.measuredLength * 3.28084).toFixed(2)  } ft ) `}
-                 
+                    {result.measuredLength.toFixed(3)} m ({(result.measuredLength * 100).toFixed(1)} cm) ({(result.measuredLength * 3.28084).toFixed(2)} ft)
                   </Text>
                 </View>
 
                 <View style={styles.resultCard}>
                   <Text style={styles.resultLabel}>Target branch length (λ/4):</Text>
                   <Text style={styles.resultValue}>
-                    {result.targetLength.toFixed(2)} {result.unit} 
+                    {result.targetLength.toFixed(3)} m ({(result.targetLength * 100).toFixed(1)} cm) ( {(result.targetLength * 3.28084).toFixed(2)} ft)
                   </Text>
                 </View>
 
                 <View style={[styles.resultCard, styles.differenceCard]}>
                   <Text style={styles.resultLabel}>Length difference:</Text>
                   <Text style={[styles.resultValue, styles.differenceValue]}>
-                    {result.difference > 0 ? '+' : ''}{result.difference.toFixed(3)} {result.unit},  
+                    {result.difference > 0 ? '+' : ''}{result.difference.toFixed(4)} m,  
+                    ( {result.difference > 0 ? '+' : ''}{(result.difference * 3.28084).toFixed(2)} ft) 
                   </Text>
                   <Text style={[styles.resultValue, styles.differenceValue]}>
-
-                 ({result.difference > 0 ? '+' : ''}{
-                         result.unit === 'm' 
-                           ? (result.difference * 100).toFixed(2) + ' cm'
-                           : (result.difference * 12).toFixed(2) + ' in'
-                       })
+                    ({result.difference > 0 ? '+' : ''}{(result.difference * 100).toFixed(2)} cm), 
+                    ({result.difference > 0 ? '+' : ''}{(result.difference * 100/2.54).toFixed(2)} in)
                   </Text>
                   <Text style={styles.adjustmentText}>
                     {result.difference > 0 
@@ -277,29 +448,28 @@ useEffect(() => {
                 <View style={styles.resultCard}>
                   <Text style={styles.resultLabel}>Frequency:</Text>
                   <Text style={styles.resultValue}>
-                    {result.frequency.toFixed(2)} MHz
+                    {result.frequency.toFixed(3)} MHz
                   </Text>
                 </View>
 
                 <View style={styles.resultCard}>
                   <Text style={styles.resultLabel}>Wavelength:</Text>
                   <Text style={styles.resultValue}>
-                    { result.wavelengthTarget.toFixed(2)} m  
-                     { (result.unit === 'ft') && ' ( '+(result.wavelengthTarget * 3.28084) .toFixed(2) + ' ft )' }
+                    {result.wavelengthTarget.toFixed(3)} m
                   </Text>
                 </View>
 
                 <View style={[styles.resultCard, styles.calculatorCard]}>
                   <Text style={styles.resultLabel}>Full dipole length (λ/2):</Text>
                   <Text style={[styles.resultValue, styles.calculatorValue]}>
-                    {result.fullDipoleLength.toFixed(2)} { result.unit} 
+                    {result.fullDipoleLength.toFixed(3)} m ({(result.fullDipoleLength * 100).toFixed(1)} cm)
                   </Text>
                 </View>
 
                 <View style={[styles.resultCard, styles.calculatorCard]}>
                   <Text style={styles.resultLabel}>Each branch length (λ/4):</Text>
                   <Text style={[styles.resultValue, styles.calculatorValue]}>
-                    {result.targetLength.toFixed(2)} { result.unit}
+                    {result.targetLength.toFixed(3)} m ({(result.targetLength * 100).toFixed(1)} cm)
                   </Text>
                 </View>
 
@@ -345,6 +515,35 @@ useEffect(() => {
 };
 
 const styles = StyleSheet.create({
+
+
+visualizerContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+    overflow: 'hidden', // Important pour que le SVG ne dépasse pas
+  },
+  visualizerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#95a5a6',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+
+
+
+
+
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
@@ -539,30 +738,6 @@ const styles = StyleSheet.create({
     marginBottom: 5,
     lineHeight: 20,
   },
-
-visualizerContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-    overflow: 'hidden', // Important pour que le SVG ne dépasse pas
-  },
-  visualizerTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#95a5a6',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-
 });
 
 export default AntennaApp;
